@@ -1,0 +1,759 @@
+{
+  "nbformat": 4,
+  "nbformat_minor": 0,
+  "metadata": {
+    "accelerator": "GPU",
+    "colab": {
+      "name": "Copy of VGG16-COVID.ipynb",
+      "provenance": [],
+      "collapsed_sections": [],
+      "include_colab_link": true
+    },
+    "kernelspec": {
+      "display_name": "Python 3",
+      "name": "python3"
+    },
+    "language_info": {
+      "name": "python"
+    }
+  },
+  "cells": [
+    {
+      "cell_type": "markdown",
+      "metadata": {
+        "id": "view-in-github",
+        "colab_type": "text"
+      },
+      "source": [
+        "<a href=\"https://colab.research.google.com/github/Rohith-2/VMD-Covid-Lung/blob/main/1D_VMD-512ipynb\" target=\"_parent\"><img src=\"https://colab.research.google.com/assets/colab-badge.svg\" alt=\"Open In Colab\"/></a>"
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {
+        "id": "F73AdTPg4kWH"
+      },
+      "source": [
+        "# Imports`"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "AxR6Y7aJi-fd"
+      },
+      "source": [
+        "! pip install -q kaggle\n",
+        "from google.colab import files\n",
+        "files.upload()\n",
+        "! mkdir ~/.kaggle\n",
+        "! cp kaggle.json ~/.kaggle/\n",
+        "! chmod 600 ~/.kaggle/kaggle.json\n",
+        "! kaggle datasets download -d rohithramakrishnan/datalung-classified\n",
+        "! mkdir Dataset\n",
+        "! unzip datalung-classified.zip -d Dataset"
+      ],
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "o4XhUSTf0GSy"
+      },
+      "source": [
+        "! rm -rf \"/content/Dataset/Lung/vmd/Atypical Appearance\"\n",
+        "! rm -rf \"/content/Dataset/Lung/vmd/Indeterminate Appearance\"\n",
+        "! rm -rf \"/content/Dataset/Lung/Original/Atypical Appearance\"\n",
+        "! rm -rf \"/content/Dataset/Lung/Original/Indeterminate Appearance\"\n",
+        "! rm -rf \"/content/sample_data\"\n",
+        "! rm \"/content/datalung-classified.zip\""
+      ],
+      "execution_count": 2,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "CPrfxrPGjeaX"
+      },
+      "source": [
+        "import os \n",
+        "import cv2\n",
+        "import numpy as np\n",
+        "import tensorflow as tf\n",
+        "import matplotlib.pyplot as plt\n",
+        "from tensorflow import keras\n",
+        "from tensorflow.keras.utils import to_categorical\n",
+        "from sklearn.model_selection import train_test_split\n",
+        "from tensorflow.keras.applications import VGG16\n",
+        "from tensorflow.keras.applications import InceptionV3\n",
+        "from tensorflow.keras.applications import nasnet\n",
+        "from tensorflow.keras import models\n",
+        "from tensorflow.keras import Model\n",
+        "from tensorflow.keras import layers\n",
+        "from tensorflow.keras import optimizers\n",
+        "from tensorflow.keras import callbacks \n",
+        "from glob import glob\n",
+        "from keras import optimizers\n",
+        "from sklearn import metrics\n",
+        "from sklearn.metrics import confusion_matrix\n",
+        "from mlxtend.plotting import plot_confusion_matrix"
+      ],
+      "execution_count": 3,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "7TWv9m-OnHDG",
+        "outputId": "66c40bbc-807b-4ea7-f437-02499baf1e45"
+      },
+      "source": [
+        "size=512\n",
+        "train_datagen = tf.keras.preprocessing.image.ImageDataGenerator(rescale=1./255,validation_split=0.2,vertical_flip=True)\n",
+        "sees=66\n",
+        "\n",
+        "Train_Data = train_datagen.flow_from_directory(\n",
+        "          '/content/Dataset/Lung/vmd',\n",
+        "          target_size=(size, size),\n",
+        "          batch_size=32,\n",
+        "          class_mode='categorical',\n",
+        "          subset='training',seed=sees)\n",
+        "\n",
+        "\n",
+        "Test_Data = train_datagen.flow_from_directory(\n",
+        "        '/content/Dataset/Lung/vmd',\n",
+        "        target_size=(size, size),\n",
+        "        batch_size=1,\n",
+        "        shuffle=False,\n",
+        "        class_mode='categorical',\n",
+        "        subset='validation',seed=sees)\n",
+        "\n",
+        "Train_Data_OG = train_datagen.flow_from_directory(\n",
+        "          '/content/Dataset/Lung/Original',\n",
+        "          target_size=(size, size),\n",
+        "          batch_size=32,\n",
+        "          class_mode='categorical',\n",
+        "          subset='training',seed=sees)\n",
+        "\n",
+        "\n",
+        "Test_Data_OG = train_datagen.flow_from_directory(\n",
+        "        '/content/Dataset/Lung/Original',\n",
+        "        target_size=(size, size),\n",
+        "        batch_size=1,\n",
+        "        shuffle=False,\n",
+        "        class_mode='categorical',\n",
+        "        subset='validation',seed=sees)"
+      ],
+      "execution_count": 4,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "text": [
+            "Found 3617 images belonging to 2 classes.\n",
+            "Found 903 images belonging to 2 classes.\n",
+            "Found 3617 images belonging to 2 classes.\n",
+            "Found 903 images belonging to 2 classes.\n"
+          ],
+          "name": "stdout"
+        }
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {
+        "id": "SaAldwDI4SyT"
+      },
+      "source": [
+        "# VGG-16"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "3AxEkV-HslZK",
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "outputId": "aa65b7d4-9a19-4770-cb8b-1c35242b1cf4"
+      },
+      "source": [
+        "vgg16= tf.keras.applications.VGG16(\n",
+        "    include_top=False,\n",
+        "    weights='imagenet',input_shape=(size,size,3)\n",
+        ")\n",
+        "# Freeze all the layers\n",
+        "for layer in vgg16.layers[:]:\n",
+        "    layer.trainable = False"
+      ],
+      "execution_count": 5,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "text": [
+            "Downloading data from https://storage.googleapis.com/tensorflow/keras-applications/vgg16/vgg16_weights_tf_dim_ordering_tf_kernels_notop.h5\n",
+            "58892288/58889256 [==============================] - 0s 0us/step\n"
+          ],
+          "name": "stdout"
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "2gmQfjdI16Mi",
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "outputId": "4a718415-7131-4fe3-871f-f0976ee4a50f"
+      },
+      "source": [
+        "  num_classes = 2\n",
+        "# Create the model\n",
+        "  model = models.Sequential()\n",
+        "\n",
+        "  # Add the vgg convolutional base model\n",
+        "  model.add(vgg16)\n",
+        "  # Add new layers\n",
+        "\n",
+        "  model.add(layers.Flatten())\n",
+        "  model.add(layers.Dense(512, activation='relu'))\n",
+        "  model.add(layers.Dropout(0.3))\n",
+        "  model.add(layers.Dense(num_classes, activation='softmax'))\n",
+        "  model.build((size,size,3))\n",
+        "  # Show a summary of the model. Check the number of trainable parameters\n",
+        "  model.summary()\n",
+        "\n",
+        "# Create the model\n",
+        "  model1 = models.Sequential()\n",
+        "\n",
+        "  # Add the vgg convolutional base model\n",
+        "  model1.add(vgg16)\n",
+        "  # Add new layers\n",
+        "\n",
+        "  model1.add(layers.Flatten())\n",
+        "  model1.add(layers.Dense(512, activation='relu'))\n",
+        "  model1.add(layers.Dropout(0.3))\n",
+        "  model1.add(layers.Dense(num_classes, activation='softmax'))\n",
+        "  model1.build((size,size,3))\n",
+        "  # Show a summary of the model. Check the number of trainable parameters"
+      ],
+      "execution_count": 6,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "text": [
+            "Model: \"sequential\"\n",
+            "_________________________________________________________________\n",
+            "Layer (type)                 Output Shape              Param #   \n",
+            "=================================================================\n",
+            "vgg16 (Functional)           (None, 16, 16, 512)       14714688  \n",
+            "_________________________________________________________________\n",
+            "flatten (Flatten)            (None, 131072)            0         \n",
+            "_________________________________________________________________\n",
+            "dense (Dense)                (None, 512)               67109376  \n",
+            "_________________________________________________________________\n",
+            "dropout (Dropout)            (None, 512)               0         \n",
+            "_________________________________________________________________\n",
+            "dense_1 (Dense)              (None, 2)                 1026      \n",
+            "=================================================================\n",
+            "Total params: 81,825,090\n",
+            "Trainable params: 67,110,402\n",
+            "Non-trainable params: 14,714,688\n",
+            "_________________________________________________________________\n"
+          ],
+          "name": "stdout"
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "BGGhS1S02H86"
+      },
+      "source": [
+        "optRMSProp=tf.keras.optimizers.RMSprop(learning_rate=0.00001, momentum=0.001, epsilon=1e-7, name=\"RMSprop\",)\n",
+        "model.compile(optimizer=optRMSProp, loss=\"categorical_crossentropy\",metrics=['accuracy'])\n",
+        "model1.compile(optimizer=optRMSProp, loss=\"categorical_crossentropy\",metrics=['accuracy'])"
+      ],
+      "execution_count": 7,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "3OvbNcge2UAV"
+      },
+      "source": [
+        "reduce_learning = callbacks.ReduceLROnPlateau(\n",
+        "    monitor='loss',\n",
+        "    factor=0.2,\n",
+        "    patience=2,\n",
+        "    verbose=1,\n",
+        "    mode='auto',\n",
+        "    min_delta=0.0001,\n",
+        "    cooldown=2,\n",
+        "    min_lr=0)\n",
+        "\n",
+        "eary_stopping = callbacks.EarlyStopping(\n",
+        "    monitor='loss',\n",
+        "    min_delta=0,\n",
+        "    patience=10,\n",
+        "    verbose=1,\n",
+        "    mode='auto')\n",
+        "\n",
+        "callback = [reduce_learning, eary_stopping]"
+      ],
+      "execution_count": 8,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "mnYypuN_2Wqu",
+        "outputId": "afcc5bf4-91b3-499e-fffe-2ef7fcecf21b"
+      },
+      "source": [
+        "VGG_16 =model.fit(Train_Data,epochs=100,callbacks=callback)"
+      ],
+      "execution_count": 9,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "text": [
+            "Epoch 1/100\n",
+            "114/114 [==============================] - 118s 648ms/step - loss: 0.6990 - accuracy: 0.6392\n",
+            "Epoch 2/100\n",
+            "114/114 [==============================] - 78s 683ms/step - loss: 0.5883 - accuracy: 0.6973\n",
+            "Epoch 3/100\n",
+            "114/114 [==============================] - 80s 702ms/step - loss: 0.5405 - accuracy: 0.7387\n",
+            "Epoch 4/100\n",
+            "114/114 [==============================] - 82s 716ms/step - loss: 0.5150 - accuracy: 0.7470\n",
+            "Epoch 5/100\n",
+            "114/114 [==============================] - 83s 725ms/step - loss: 0.4921 - accuracy: 0.7752\n",
+            "Epoch 6/100\n",
+            "114/114 [==============================] - 84s 733ms/step - loss: 0.4858 - accuracy: 0.7708\n",
+            "Epoch 7/100\n",
+            "114/114 [==============================] - 84s 733ms/step - loss: 0.4692 - accuracy: 0.7824\n",
+            "Epoch 8/100\n",
+            "114/114 [==============================] - 84s 734ms/step - loss: 0.4498 - accuracy: 0.7998\n",
+            "Epoch 9/100\n",
+            "114/114 [==============================] - 84s 735ms/step - loss: 0.4351 - accuracy: 0.8029\n",
+            "Epoch 10/100\n",
+            "114/114 [==============================] - 84s 732ms/step - loss: 0.4318 - accuracy: 0.7996\n",
+            "Epoch 11/100\n",
+            "114/114 [==============================] - 84s 733ms/step - loss: 0.4244 - accuracy: 0.8103\n",
+            "Epoch 12/100\n",
+            "114/114 [==============================] - 84s 730ms/step - loss: 0.4143 - accuracy: 0.8098\n",
+            "Epoch 13/100\n",
+            "114/114 [==============================] - 84s 733ms/step - loss: 0.4037 - accuracy: 0.8208\n",
+            "Epoch 14/100\n",
+            "114/114 [==============================] - 84s 735ms/step - loss: 0.3907 - accuracy: 0.8242\n",
+            "Epoch 15/100\n",
+            "114/114 [==============================] - 84s 735ms/step - loss: 0.3724 - accuracy: 0.8421\n",
+            "Epoch 16/100\n",
+            "114/114 [==============================] - 84s 735ms/step - loss: 0.3774 - accuracy: 0.8327\n",
+            "Epoch 17/100\n",
+            "114/114 [==============================] - 84s 733ms/step - loss: 0.3600 - accuracy: 0.8349\n",
+            "Epoch 18/100\n",
+            "114/114 [==============================] - 84s 734ms/step - loss: 0.3567 - accuracy: 0.8399\n",
+            "Epoch 19/100\n",
+            "114/114 [==============================] - 84s 733ms/step - loss: 0.3490 - accuracy: 0.8499\n",
+            "Epoch 20/100\n",
+            "114/114 [==============================] - 84s 734ms/step - loss: 0.3310 - accuracy: 0.8537\n",
+            "Epoch 21/100\n",
+            "114/114 [==============================] - 84s 735ms/step - loss: 0.3329 - accuracy: 0.8524\n",
+            "Epoch 22/100\n",
+            "114/114 [==============================] - 84s 733ms/step - loss: 0.3277 - accuracy: 0.8584\n",
+            "Epoch 23/100\n",
+            "114/114 [==============================] - 84s 734ms/step - loss: 0.3205 - accuracy: 0.8645\n",
+            "Epoch 24/100\n",
+            "114/114 [==============================] - 84s 734ms/step - loss: 0.3057 - accuracy: 0.8701\n",
+            "Epoch 25/100\n",
+            "114/114 [==============================] - 84s 733ms/step - loss: 0.3103 - accuracy: 0.8670\n",
+            "Epoch 26/100\n",
+            "114/114 [==============================] - 84s 733ms/step - loss: 0.2955 - accuracy: 0.8786\n",
+            "Epoch 27/100\n",
+            "114/114 [==============================] - 84s 733ms/step - loss: 0.2902 - accuracy: 0.8748\n",
+            "Epoch 28/100\n",
+            "114/114 [==============================] - 84s 735ms/step - loss: 0.2903 - accuracy: 0.8789\n",
+            "Epoch 29/100\n",
+            "114/114 [==============================] - 84s 734ms/step - loss: 0.2835 - accuracy: 0.8731\n",
+            "Epoch 30/100\n",
+            "114/114 [==============================] - 84s 734ms/step - loss: 0.2797 - accuracy: 0.8819\n",
+            "Epoch 31/100\n",
+            "114/114 [==============================] - 84s 733ms/step - loss: 0.2709 - accuracy: 0.8806\n",
+            "Epoch 32/100\n",
+            "114/114 [==============================] - 84s 733ms/step - loss: 0.2625 - accuracy: 0.8919\n",
+            "Epoch 33/100\n",
+            "114/114 [==============================] - 84s 734ms/step - loss: 0.2615 - accuracy: 0.8905\n",
+            "Epoch 34/100\n",
+            "114/114 [==============================] - 84s 734ms/step - loss: 0.2567 - accuracy: 0.8933\n",
+            "Epoch 35/100\n",
+            "114/114 [==============================] - 84s 732ms/step - loss: 0.2470 - accuracy: 0.9030\n",
+            "Epoch 36/100\n",
+            "114/114 [==============================] - 84s 735ms/step - loss: 0.2410 - accuracy: 0.9057\n",
+            "Epoch 37/100\n",
+            "114/114 [==============================] - 84s 734ms/step - loss: 0.2342 - accuracy: 0.9054\n",
+            "Epoch 38/100\n",
+            "114/114 [==============================] - 84s 734ms/step - loss: 0.2340 - accuracy: 0.9099\n",
+            "Epoch 39/100\n",
+            "114/114 [==============================] - 84s 734ms/step - loss: 0.2245 - accuracy: 0.9137\n",
+            "Epoch 40/100\n",
+            "114/114 [==============================] - 84s 735ms/step - loss: 0.2188 - accuracy: 0.9193\n",
+            "Epoch 41/100\n",
+            "114/114 [==============================] - 84s 734ms/step - loss: 0.2213 - accuracy: 0.9148\n",
+            "Epoch 42/100\n",
+            "114/114 [==============================] - 84s 736ms/step - loss: 0.2131 - accuracy: 0.9193\n",
+            "Epoch 43/100\n",
+            "114/114 [==============================] - 84s 735ms/step - loss: 0.2122 - accuracy: 0.9198\n",
+            "Epoch 44/100\n",
+            "114/114 [==============================] - 84s 736ms/step - loss: 0.2099 - accuracy: 0.9212\n",
+            "Epoch 45/100\n",
+            "114/114 [==============================] - 84s 735ms/step - loss: 0.1922 - accuracy: 0.9281\n",
+            "Epoch 46/100\n",
+            "114/114 [==============================] - 84s 734ms/step - loss: 0.1934 - accuracy: 0.9278\n",
+            "Epoch 47/100\n",
+            "114/114 [==============================] - 84s 736ms/step - loss: 0.1949 - accuracy: 0.9295\n",
+            "\n",
+            "Epoch 00047: ReduceLROnPlateau reducing learning rate to 1.9999999494757505e-06.\n",
+            "Epoch 48/100\n",
+            "114/114 [==============================] - 84s 733ms/step - loss: 0.1535 - accuracy: 0.9569\n",
+            "Epoch 49/100\n",
+            "114/114 [==============================] - 84s 734ms/step - loss: 0.1484 - accuracy: 0.9566\n",
+            "Epoch 50/100\n",
+            "114/114 [==============================] - 84s 735ms/step - loss: 0.1452 - accuracy: 0.9605\n",
+            "Epoch 51/100\n",
+            "114/114 [==============================] - 84s 735ms/step - loss: 0.1474 - accuracy: 0.9583\n",
+            "Epoch 52/100\n",
+            "114/114 [==============================] - 84s 734ms/step - loss: 0.1405 - accuracy: 0.9627\n",
+            "Epoch 53/100\n",
+            "114/114 [==============================] - 84s 732ms/step - loss: 0.1396 - accuracy: 0.9630\n",
+            "Epoch 54/100\n",
+            "114/114 [==============================] - 84s 734ms/step - loss: 0.1376 - accuracy: 0.9663\n",
+            "Epoch 55/100\n",
+            "114/114 [==============================] - 84s 740ms/step - loss: 0.1359 - accuracy: 0.9660\n",
+            "Epoch 56/100\n",
+            "114/114 [==============================] - 84s 733ms/step - loss: 0.1383 - accuracy: 0.9654\n",
+            "Epoch 57/100\n",
+            "114/114 [==============================] - 84s 735ms/step - loss: 0.1372 - accuracy: 0.9671\n",
+            "\n",
+            "Epoch 00057: ReduceLROnPlateau reducing learning rate to 3.999999989900971e-07.\n",
+            "Epoch 58/100\n",
+            "114/114 [==============================] - 84s 735ms/step - loss: 0.1334 - accuracy: 0.9710\n",
+            "Epoch 59/100\n",
+            "114/114 [==============================] - 84s 735ms/step - loss: 0.1321 - accuracy: 0.9710\n",
+            "Epoch 60/100\n",
+            "114/114 [==============================] - 84s 735ms/step - loss: 0.1320 - accuracy: 0.9685\n",
+            "Epoch 61/100\n",
+            "114/114 [==============================] - 84s 736ms/step - loss: 0.1321 - accuracy: 0.9726\n",
+            "Epoch 62/100\n",
+            "114/114 [==============================] - 84s 733ms/step - loss: 0.1297 - accuracy: 0.9712\n",
+            "Epoch 63/100\n",
+            "114/114 [==============================] - 84s 733ms/step - loss: 0.1280 - accuracy: 0.9668\n",
+            "Epoch 64/100\n",
+            "114/114 [==============================] - 84s 735ms/step - loss: 0.1294 - accuracy: 0.9721\n",
+            "Epoch 65/100\n",
+            "114/114 [==============================] - 84s 736ms/step - loss: 0.1315 - accuracy: 0.9685\n",
+            "\n",
+            "Epoch 00065: ReduceLROnPlateau reducing learning rate to 8.00000009348878e-08.\n",
+            "Epoch 66/100\n",
+            "114/114 [==============================] - 84s 733ms/step - loss: 0.1298 - accuracy: 0.9726\n",
+            "Epoch 67/100\n",
+            "114/114 [==============================] - 84s 734ms/step - loss: 0.1300 - accuracy: 0.9688\n",
+            "Epoch 68/100\n",
+            "114/114 [==============================] - 84s 732ms/step - loss: 0.1288 - accuracy: 0.9707\n",
+            "\n",
+            "Epoch 00068: ReduceLROnPlateau reducing learning rate to 1.5999999902760466e-08.\n",
+            "Epoch 69/100\n",
+            "114/114 [==============================] - 84s 732ms/step - loss: 0.1259 - accuracy: 0.9748\n",
+            "Epoch 70/100\n",
+            "114/114 [==============================] - 84s 732ms/step - loss: 0.1264 - accuracy: 0.9729\n",
+            "Epoch 71/100\n",
+            "114/114 [==============================] - 84s 731ms/step - loss: 0.1258 - accuracy: 0.9754\n",
+            "\n",
+            "Epoch 00071: ReduceLROnPlateau reducing learning rate to 3.1999999094978194e-09.\n",
+            "Epoch 72/100\n",
+            "114/114 [==============================] - 84s 735ms/step - loss: 0.1266 - accuracy: 0.9704\n",
+            "Epoch 73/100\n",
+            "114/114 [==============================] - 84s 733ms/step - loss: 0.1266 - accuracy: 0.9754\n",
+            "Epoch 74/100\n",
+            "114/114 [==============================] - 84s 733ms/step - loss: 0.1284 - accuracy: 0.9735\n",
+            "\n",
+            "Epoch 00074: ReduceLROnPlateau reducing learning rate to 6.399999641359955e-10.\n",
+            "Epoch 75/100\n",
+            "114/114 [==============================] - 84s 733ms/step - loss: 0.1294 - accuracy: 0.9718\n",
+            "Epoch 76/100\n",
+            "114/114 [==============================] - 84s 731ms/step - loss: 0.1290 - accuracy: 0.9729\n",
+            "Epoch 77/100\n",
+            "114/114 [==============================] - 84s 732ms/step - loss: 0.1278 - accuracy: 0.9726\n",
+            "\n",
+            "Epoch 00077: ReduceLROnPlateau reducing learning rate to 1.27999988386307e-10.\n",
+            "Epoch 78/100\n",
+            "114/114 [==============================] - 84s 734ms/step - loss: 0.1286 - accuracy: 0.9707\n",
+            "Epoch 79/100\n",
+            "114/114 [==============================] - 84s 734ms/step - loss: 0.1261 - accuracy: 0.9751\n",
+            "Epoch 80/100\n",
+            "114/114 [==============================] - 84s 730ms/step - loss: 0.1276 - accuracy: 0.9737\n",
+            "\n",
+            "Epoch 00080: ReduceLROnPlateau reducing learning rate to 2.559999712214989e-11.\n",
+            "Epoch 81/100\n",
+            "114/114 [==============================] - 84s 734ms/step - loss: 0.1290 - accuracy: 0.9710\n",
+            "Epoch 00081: early stopping\n"
+          ],
+          "name": "stdout"
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "cSmGSb-SK3F4",
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "outputId": "7a32282a-9d15-47c9-852f-3a4af495d872"
+      },
+      "source": [
+        "reduce_learning = callbacks.ReduceLROnPlateau(\n",
+        "    monitor='loss',\n",
+        "    factor=0.2,\n",
+        "    patience=2,\n",
+        "    verbose=1,\n",
+        "    mode='auto',\n",
+        "    min_delta=0.0001,\n",
+        "    cooldown=2,\n",
+        "    min_lr=0)\n",
+        "\n",
+        "eary_stopping = callbacks.EarlyStopping(\n",
+        "    monitor='loss',\n",
+        "    min_delta=0,\n",
+        "    patience=10,\n",
+        "    verbose=1,\n",
+        "    mode='auto')\n",
+        "\n",
+        "callback = [reduce_learning, eary_stopping]\n",
+        "\n",
+        "VGG_161 =model1.fit(Train_Data_OG,epochs=100,callbacks=callback)"
+      ],
+      "execution_count": 10,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "text": [
+            "Epoch 1/100\n",
+            "114/114 [==============================] - 83s 722ms/step - loss: 0.7429 - accuracy: 0.5195\n",
+            "Epoch 2/100\n",
+            "114/114 [==============================] - 83s 722ms/step - loss: 0.7449 - accuracy: 0.5145\n",
+            "Epoch 3/100\n",
+            "114/114 [==============================] - 83s 723ms/step - loss: 0.7452 - accuracy: 0.5071\n",
+            "\n",
+            "Epoch 00003: ReduceLROnPlateau reducing learning rate to 5.119999563207856e-12.\n",
+            "Epoch 4/100\n",
+            "114/114 [==============================] - 83s 722ms/step - loss: 0.7525 - accuracy: 0.4952\n",
+            "Epoch 5/100\n",
+            "114/114 [==============================] - 83s 723ms/step - loss: 0.7366 - accuracy: 0.5054\n",
+            "Epoch 6/100\n",
+            "114/114 [==============================] - 83s 722ms/step - loss: 0.7476 - accuracy: 0.5037\n",
+            "Epoch 7/100\n",
+            "114/114 [==============================] - 83s 722ms/step - loss: 0.7467 - accuracy: 0.5068\n",
+            "\n",
+            "Epoch 00007: ReduceLROnPlateau reducing learning rate to 1.0239998952943363e-12.\n",
+            "Epoch 8/100\n",
+            "114/114 [==============================] - 83s 722ms/step - loss: 0.7383 - accuracy: 0.5156\n",
+            "Epoch 9/100\n",
+            "114/114 [==============================] - 83s 722ms/step - loss: 0.7389 - accuracy: 0.5040\n",
+            "Epoch 10/100\n",
+            "114/114 [==============================] - 82s 720ms/step - loss: 0.7519 - accuracy: 0.5071\n",
+            "\n",
+            "Epoch 00010: ReduceLROnPlateau reducing learning rate to 2.0479997905886728e-13.\n",
+            "Epoch 11/100\n",
+            "114/114 [==============================] - 82s 721ms/step - loss: 0.7422 - accuracy: 0.5123\n",
+            "Epoch 12/100\n",
+            "114/114 [==============================] - 82s 721ms/step - loss: 0.7383 - accuracy: 0.5048\n",
+            "Epoch 13/100\n",
+            "114/114 [==============================] - 82s 721ms/step - loss: 0.7326 - accuracy: 0.5112\n",
+            "Epoch 14/100\n",
+            "114/114 [==============================] - 83s 722ms/step - loss: 0.7499 - accuracy: 0.4982\n",
+            "Epoch 15/100\n",
+            "114/114 [==============================] - 82s 721ms/step - loss: 0.7430 - accuracy: 0.5118\n",
+            "\n",
+            "Epoch 00015: ReduceLROnPlateau reducing learning rate to 4.095999526967237e-14.\n",
+            "Epoch 16/100\n",
+            "114/114 [==============================] - 82s 719ms/step - loss: 0.7525 - accuracy: 0.5010\n",
+            "Epoch 17/100\n",
+            "114/114 [==============================] - 83s 723ms/step - loss: 0.7373 - accuracy: 0.5142\n",
+            "Epoch 18/100\n",
+            "114/114 [==============================] - 82s 721ms/step - loss: 0.7358 - accuracy: 0.5120\n",
+            "\n",
+            "Epoch 00018: ReduceLROnPlateau reducing learning rate to 8.191999189459745e-15.\n",
+            "Epoch 19/100\n",
+            "114/114 [==============================] - 82s 721ms/step - loss: 0.7486 - accuracy: 0.5079\n",
+            "Epoch 20/100\n",
+            "114/114 [==============================] - 83s 722ms/step - loss: 0.7425 - accuracy: 0.5131\n",
+            "Epoch 21/100\n",
+            "114/114 [==============================] - 83s 722ms/step - loss: 0.7403 - accuracy: 0.5043\n",
+            "\n",
+            "Epoch 00021: ReduceLROnPlateau reducing learning rate to 1.638399905654585e-15.\n",
+            "Epoch 22/100\n",
+            "114/114 [==============================] - 83s 722ms/step - loss: 0.7345 - accuracy: 0.5079\n",
+            "Epoch 23/100\n",
+            "114/114 [==============================] - 82s 719ms/step - loss: 0.7461 - accuracy: 0.5010\n",
+            "Epoch 00023: early stopping\n"
+          ],
+          "name": "stdout"
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "MmTafSdWVfNV"
+      },
+      "source": [
+        "predict1 = model.predict(Test_Data, steps=None)\n",
+        "predict2 = model1.predict(Test_Data_OG, steps=None)"
+      ],
+      "execution_count": 11,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "yKOPQgDrXw83"
+      },
+      "source": [
+        "in1=[]\n",
+        "for i in np.arange(predict1.shape[0]):\n",
+        "  A= np.max(predict1[i])\n",
+        "  index_1= np.where(predict1[i]==A)\n",
+        "  in1.append(index_1[0][0])\n",
+        "in1=np.array(in1)\n",
+        "\n",
+        "in2=[]\n",
+        "for i in np.arange(predict2.shape[0]):\n",
+        "  A= np.max(predict2[i])\n",
+        "  index_1= np.where(predict2[i]==A)\n",
+        "  in2.append(index_1[0][0])\n",
+        "in2=np.array(in2)"
+      ],
+      "execution_count": 12,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "4-tVvXcBVmgP",
+        "colab": {
+          "base_uri": "https://localhost:8080/",
+          "height": 881
+        },
+        "outputId": "705065ee-2871-4928-b95f-402c687caca8"
+      },
+      "source": [
+        "print(\"VMDed Data\")\n",
+        "true_classes = Test_Data.classes\n",
+        "class_labels = list(Test_Data.class_indices.keys()) \n",
+        "predicted_classes = (in1)\n",
+        "report = metrics.classification_report(true_classes, predicted_classes, target_names=class_labels)\n",
+        "print(report)\n",
+        "cm1 = confusion_matrix(true_classes,predicted_classes)\n",
+        "#print(cm2)\n",
+        "#Visualizing confusion matrix\n",
+        "fig, ax = plot_confusion_matrix(conf_mat=cm1, colorbar=True)\n",
+        "plt.show()\n",
+        "\n",
+        "print(\"Original Data\")\n",
+        "true_classes = Test_Data_OG.classes\n",
+        "class_labels = list(Test_Data_OG.class_indices.keys()) \n",
+        "predicted_classes = (in2)\n",
+        "report = metrics.classification_report(true_classes, predicted_classes, target_names=class_labels)\n",
+        "print(report)\n",
+        "cm1 = confusion_matrix(true_classes,predicted_classes)\n",
+        "#print(cm2)\n",
+        "#Visualizing confusion matrix\n",
+        "fig, ax = plot_confusion_matrix(conf_mat=cm1, colorbar=True)\n",
+        "plt.show()\n"
+      ],
+      "execution_count": 13,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "text": [
+            "VMDed Data\n",
+            "                        precision    recall  f1-score   support\n",
+            "\n",
+            "Negative for Pneumonia       0.72      0.64      0.68       331\n",
+            "    Typical Appearance       0.81      0.85      0.83       572\n",
+            "\n",
+            "              accuracy                           0.78       903\n",
+            "             macro avg       0.76      0.75      0.75       903\n",
+            "          weighted avg       0.77      0.78      0.77       903\n",
+            "\n"
+          ],
+          "name": "stdout"
+        },
+        {
+          "output_type": "display_data",
+          "data": {
+            "image/png": "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\n",
+            "text/plain": [
+              "<Figure size 432x288 with 2 Axes>"
+            ]
+          },
+          "metadata": {
+            "tags": [],
+            "needs_background": "light"
+          }
+        },
+        {
+          "output_type": "stream",
+          "text": [
+            "Original Data\n",
+            "                        precision    recall  f1-score   support\n",
+            "\n",
+            "Negative for Pneumonia       0.33      0.31      0.32       331\n",
+            "    Typical Appearance       0.62      0.64      0.63       572\n",
+            "\n",
+            "              accuracy                           0.52       903\n",
+            "             macro avg       0.47      0.47      0.47       903\n",
+            "          weighted avg       0.51      0.52      0.51       903\n",
+            "\n"
+          ],
+          "name": "stdout"
+        },
+        {
+          "output_type": "display_data",
+          "data": {
+            "image/png": "iVBORw0KGgoAAAANSUhEUgAAATgAAAEGCAYAAADxD4m3AAAABHNCSVQICAgIfAhkiAAAAAlwSFlzAAALEgAACxIB0t1+/AAAADh0RVh0U29mdHdhcmUAbWF0cGxvdGxpYiB2ZXJzaW9uMy4yLjIsIGh0dHA6Ly9tYXRwbG90bGliLm9yZy+WH4yJAAAbxUlEQVR4nO3debxVdb3/8df7nMOkB5mnyxwihl5FQaQ08+JsKplmUk6p4TXz5tW8aWWmaZma3aw0MaeciqsZ5A9TM3HKCQkQRAxFBURmmWc+vz/2grbEOWcvOJt99jrv532sx9nru9de67Pz+vb7XWuv71JEYGaWRRWlLsDMrFgccGaWWQ44M8ssB5yZZZYDzswyq6rUBeRr37599OzZq9RlWApzlq4pdQmWwtL5c1i9bIl2ZB+Vu/WM2LC6oG1j9YLHI+LoHTnejmhQAdezZy9eeHl8qcuwFL479s1Sl2Ap3H/xyTu8j9iwmmb9Tilo2zUTf9V+hw+4AxpUwJlZORCoPM5uOeDMLB0BFZWlrqIgDjgzS087dBpvp3HAmVlKHqKaWZa5B2dmmSTcgzOzrJJ7cGaWYWVyFbU8+plm1oAkFxkKWWrbi9Rc0iuSJkmaKumqpP1uSTMlTUyWAUm7JN0saYakyZL2r6tS9+DMLB1RX0PUtcDQiFghqQnwvKTHkvcujYiHttr+GKBvshwI3Jr8rZEDzszSq4eLDJGbTnxFstokWWqbYnwY8Nvkcy9Jai2pS0TMrekDHqKaWUr1M0QFkFQpaSIwH3gyIl5O3ro2GYb+TFKzpK0rMCvv47OTtho54MwsHQGVlYUt0F7S+LxlRP6uImJjRAwAugGDJe0NXA7sCRwAtAW+vb2leohqZukVfg5uYUQMqmujiPhI0tPA0RFxY9K8VtJdwLeS9TlA97yPdUvaauQenJmlVG9XUTtIap28bgEcAbwpqUvSJuDzwJTkI2OAM5KrqUOApbWdfwP34Mxse9TPVdQuwD2SKsl1tkZFxKOS/iqpA7nB8ETgP5PtxwLHAjOAVcBX6zqAA87M0qufq6iTgf220T60hu0DuCDNMRxwZpaOfKuWmWVZmdyq5YAzs5Q8H5yZZZmHqGaWSZ4Pzsyyy0NUM8syX2Qws8zyOTgzyyR5iGpmWeYenJlllRxwZpZFuRnLHXBmlkUSqnDAmVlGuQdnZpnlgDOzzHLAmVk2KVnKgAPOzFIRcg/OzLKrosJ3MphZRrkHZ2bZ5HNwZpZl7sGZWSb5IoOZZZpv1TKzbJKHqGaWYQ44M8ssB5yZZZIvMphZtpVHvjngzCwl+VYtM8swD1HNLLvKI98ccPXhvHPP5rGxj9KhY0demzgFgMWLF3P6l7/Ee++9S8+evbjvwVG0adOGBx+4n5tu+AkRQXXLltz8y1vZZ999S/wNGpfWzasYvn8XqptVQcBL733EczOXcFz/DuzVqZoNESxauZ7f/X0uazZsolJw8r6d6d66ORHwxynzeXvRqlJ/jZIqlx5cUQfSko6WNF3SDEmXFfNYpXT6mWcx+tE/f6ztxuuv49ChhzFl2j84dOhh3Hj9dQD06tWbJ/76DOMnvs7l372CC84fUYqSG7WNEYyZOp8bnp7Jzc+9x0G929CpuilvLVjJDeNm8tNx77JgxToO69sOgCE9WwNw47h3ue3FWRy/V8dy6cAUhaSClzr201zSK5ImSZoq6aqkvbekl5Pc+L2kpkl7s2R9RvJ+r7pqLVrASaoEfgUcA/QHhkvqX6zjldLBnzmEtm3bfqzt0T+N5rTTzwTgtNPP5E9j/gjApz79adq0aQPA4AOHMGfO7J1brLF87UbmLF0LwNqNm5i3fC2tWlTx1oJVbIrcNu8tWU3rFrkBTqeWzZixMNdjW7FuI2vWb6Rb6+Ylqb2hqI+AA9YCQyNiX2AAcLSkIcBPgJ9FxO7AEuCcZPtzgCVJ+8+S7WpVzB7cYGBGRLwTEeuA3wHDini8BmX+vHl06dIFgM6dOzN/3rx/2ebuu+7gqKOO2dmlWZ42LZrQtVVz3luy5mPtg3u0Ztr8lQB8sGwNe3WupkLQdpcmdGvdnNYtmpSi3AZDFSpoqU3krEhWmyRLAEOBh5L2e4DPJ6+HJesk7x+mOlK0mOfgugKz8tZnAwduvZGkEcAIgO49ehSxnNLZ1n/Nnhn3NPfcdQdPjXu+RFVZ00px5gFdGT11Hms3bNrSfljfdmyKYMLsZQC88v5SOlY346JDerFk1XreXbyaiChV2Q1CinNw7SWNz1sfGREj8/ZTCbwG7E5uxPc28FFEbEg2mU0uSyAvUyJig6SlQDtgYU0HL/lFhuTLjgQYOHBQZv6/pmOnTsydO5cuXbowd+5cOnTsuOW91ydP5vzzzmX0nx6jXbt2Jayy8aoQnHVAVybMXsrrc1dsaT+geyv6d6rm1y++v6VtU8CYqfO3rF94cA8WrFi3U+ttUNLdbL8wIgbV9GZEbAQGSGoNPALsWQ8VblHMIeocoHveerekrVH43HEncN+9ud70fffew3HH50bn77//Pqee8gXuuOte+u6xRylLbNS+NKAL85av49l3lmxp69dhVw7dvS13vjKb9Rv/+d/aJpWiaWXuX+g9OuzCxoB5jTjgBEiFLYWKiI+Ap4FPAa0lbe585efGlkxJ3m8FLKptv8Xswb0K9JXUOynsVODLRTxeyZxx2nCee2YcCxcupE+vblzx/av41v9cxmnDT+Geu+6gR4+e3PfgKAB+fM3VLF60iIsu/DoAVVVVvPDy+Np2b/Wsd9sWDOreig+WreHiz/YCYOy0BZz4752oqhDnfSr33+X3lqzm4cnzqG5axYhPdSMClq7ZwIMTPihh9Q1B/dyLKqkDsD4iPpLUAjiC3IWDp4GTyZ23PxMYnXxkTLL+YvL+X6OOcwUq5rkESccC/wtUAndGxLW1bT9w4KDwv+zl5btj3yx1CZbC/RefzIczpuxQOjXvvEf0PPMXBW371vVHv1bTEFXSPuQuGlSSG02OioirJX2CXLi1Bf4OnBYRayU1B+4F9gMWA6dGxDu1Hb+o5+AiYiwwtpjHMLOdLOXwsyYRMZlcWG3d/g65X2Fs3b4G+GKaY5T8IoOZlRcBFZ6y3Myyqkzu1HLAmVl65XIvqgPOzNKpp3NwO4MDzsxSEfKEl2aWXe7BmVlm+RycmWWTz8GZWVbl7kUtj4RzwJlZamWSbw44M0vPdzKYWTalmw+upBxwZpbK5vngyoEDzsxSqp/54HYGB5yZpVYm+eaAM7OU5IsMZpZR/h2cmWWaA87MMqtM8s0BZ2bpuQdnZtnkm+3NLKtyE16WR8I54MwstYoy6cI54MwstTLJNwecmaUj32xvZllWJqfgHHBmll7ZX2SQtByIzavJ30heR0TsVuTazKwBErkrqeWgxoCLiJY7sxAzKx9l0oGjoKe3SjpY0leT1+0l9S5uWWbWYCk3H1whS6nVeQ5O0pXAIKAfcBfQFLgPOKi4pZlZQ9UAsqsghVxkOBHYD5gAEBEfSPLw1ayREuXzQ99ChqjrIiJILjhI2rW4JZlZQ1dRoYKW2kjqLulpSW9Imirpm0n7DyTNkTQxWY7N+8zlkmZImi7pqLrqLKQHN0rSbUBrSV8DzgZuL+BzZpZBqr+b7TcAl0TEhGRU+JqkJ5P3fhYRN378uOoPnArsBfwb8BdJe0TExpoOUGfARcSNko4AlgF7AN+PiCfr+JiZZVh9DFEjYi4wN3m9XNI0oGstHxkG/C4i1gIzJc0ABgMv1lhngbW8DjwHPJu8NrNGTAUuQHtJ4/OWEdvcn9SL3Ln+l5Omb0iaLOlOSW2Stq7ArLyPzab2QKw74CSdC7wCfAE4GXhJ0tl1fc7MsivFz0QWRsSgvGXkNvZVDTwMXBQRy4BbgT7AAHI9vJ9ub52FnIO7FNgvIhYlxbQD/gbcub0HNbPylbuKWk/7kpqQC7f7I+IPABExL+/924FHk9U5QPe8j3dL2mpUyBB1EbA8b3150mZmjZEKu4JawFVUAXcA0yLiprz2LnmbnQhMSV6PAU6V1Cy52aAvudFljWq7F/Xi5OUM4GVJo8n9VGQYMLnWys0s0+rpLoWDgNOB1yVNTNq+AwyXNIBc3rwLnAcQEVMljQLeIHcF9oLarqBC7UPUzT/mfTtZNhud8kuYWYbU1xA1Ip6Hbd61P7aWz1wLXFvoMWq72f6qQndiZo1LQ7jPtBCF3IvaAfgfcj+ua765PSKGFrEuM2vAyiPeCrvIcD/wJtAbuIrcmPjVItZkZg2YBJUVKmgptUICrl1E3AGsj4hnIuJswL03s0YsM9MlAeuTv3MlfQ74AGhbvJLMrKFrANlVkEIC7hpJrYBLgF8AuwH/XdSqzKzBEiqb6ZIKudl+86+IlwL/UdxyzKzBq7/ZRIquth/6/oJ/PnTmX0TEf9V3MQtXrePuV9+t791aEd1y5S9LXYKlsPaD+fWyn4Zwfq0QtfXgxu+0KsysbAioLPeAi4h7dmYhZlY+GsAvQAriBz+bWWoOODPLpNyU5eWRcA44M0utXHpwhczou4ekpyRNSdb3kfS94pdmZg3V5gfP1LWUWiG3at0OXE5yR0NETCb3ZBsza4QEVEkFLaVWyBB1l4h4Zasx94Yi1WNmZaABZFdBCgm4hZL68M8HP59M8qgvM2t8pAzdqgVcAIwE9pQ0B5gJnFbUqsysQSuTfCvoXtR3gMMl7QpURMTyuj5jZtlWLldRC5nR9/tbrQMQEVcXqSYza8AEDWIyy0IUMkRdmfe6OXAcMK045ZhZg6cM9eAi4mNPlZZ0I/B40SoyswZPZfJUhu25k2EXck+UNrNGqD6fbF9shZyDe51/zgtXCXQAfP7NrBHLTMCRO+e22QZgXkT4h75mjVgmbraXVAk8HhF77qR6zKyByz02sNRVFKbWMiNiIzBdUo+dVI+ZlYGK5G6GupZSK2SI2gaYKukV8n4yEhEnFK0qM2uwMnWRAbii6FWYWVlpAJ2zghQScMdGxLfzGyT9BHimOCWZWcMmKsrkd3CFnCo8Yhttx9R3IWZWHkT5THhZ23NRzwe+DnxC0uS8t1oCLxS7MDNroARVZXISrrYe3APA8cCY5O/mZWBEeLoks0aqvnpwkrpLelrSG5KmSvpm0t5W0pOS/pH8bZO0S9LNkmZImixp/7pqre25qEuBpcDwFN/dzBqBevoJyAbgkoiYIKkl8JqkJ4GzgKci4jpJlwGXAd8md2qsb7IcCNya/K25zvqo0swal/rowUXE3IiYkLxeTm6Woq7AMGDzg+fvAT6fvB4G/DZyXgJaS+pS2zH82EAzS0Wk6hm1lzQ+b31kRIz8l31KvYD9gJeBThGx+bEIHwKdktddgVl5H5udtNX4CAUHnJmlo1RD1IURMajW3UnVwMPARRGxLP8+14gISVHjh+vggDOzVHJ3MtTPVVRJTciF2/0R8YekeZ6kLhExNxmCzk/a5wDd8z7eLWmrkc/BmVlqKnCpdR+5rtodwLSIuCnvrTHAmcnrM4HRee1nJFdThwBL84ay2+QenJmlVk8duIOA04HXJU1M2r4DXAeMknQO8B5wSvLeWOBYYAawCvhqXQdwwJlZSqqX+eAi4nlq7ugdto3tg9xjTAvmgDOzVFJeRS0pB5yZpdYQ5norhAPOzNJRRqYsNzPbmoeoZpZp7sGZWWaVR7w54MwsJQGV7sGZWVaVSb454MwsLaEyGaQ64MwsNffgzCyTcj8TKY+Ec8CZWToN5IlZhXDAmVlqvlXLzDIpN+FlqasojAPOzFLzVVQzy6wyGaE64HbU4nkfcM8PL2HZ4oVI4uAThjP0S19l5bKP+M0V32DR3Dm069KVc3/4K3bdrRUAb014if/7+dVs3LCB6lZtuPiW35f4WzQuzZpW8Zc7LqJp0yqqKit55C9/55pfjwXgBxcczxeO2I+NGzdx+0PPccuDzwDwmYF9ueHSk2hSVcmij1Zw5Lk/L+VXKLlG34OTdCdwHDA/IvYu1nFKrbKyipMu/C49+u3NmpUr+PHZx/PJwQfz4tiH2HPgQRx1xvk8/ttbeeLeWznxgstYtXwZD954BRfedDdtO3dl2eKFpf4Kjc7adRs4esTNrFy9jqqqCv5658U88cIb9OvdmW6dW7PviT8kIujQphqAVtUt+Pl3TmHYBbcw68MlW9obq3I6B1fMWU/uBo4u4v4bhFbtO9KjXy6/m+9aTeeeu/PRgg+Z9NyTDDn2JACGHHsSE597AoBXnxjNgM8eRdvOXQHYrW370hTeyK1cvQ6AJlWVVFVVEhGM+OLB/GjkY+RmxoYFS1YA8KVjBjH6qUnM+nDJx9obLYmKApdSK1oPLiKeTR7m2mgsmjubWf94g157DWD54oW0at8RgN3adWB50lObN2smGzes56YLTmXNqpUMPeUshhxzUinLbpQqKsTfHvg2fbp34LbfP8urU96jd7cOnHzkQE4Yui8Llyznkusf4u33F9C3Z0eqqip5/PZvUr1LM3714DgeePSVUn+Fkip9dBWm5OfgJI0ARgC07fRvJa5m+61ZtZLbvnM+X/zmFbTYteXH3pP++cvITRs38P70KVx08/2sX7uG60ecRO+99qNTj0+UouxGa9OmYMip19GqugW/v+lr9O/ThWZNq1i7bj0Hf+V6hg3dl9uu/AqHn/O/VFVWsP8nu3PMeb+gRfMmjLvnEl6Z/C4z3p9f94EyqD6fi1psJZ+YMyJGRsSgiBhU3aZdqcvZLhs3rGfkd85n8JHD2O/Q3Ki8Zdv2LF2Y+xdg6cL5tEy+W5sOXeh/4CE0a7EL1a3b0nfAYGbPmFay2hu7pStW88z4tzjy0/2ZM28Jf3xqEgCj/zqJvfvmTiPMmf8RT744jVVr1rHoo5U8P2EG++zRtZRll1x9PBd1Zyh5wJW7iODeH32bzr125/Dh525p3+fgw3lp7MMAvDT2Yfb9zBG59kOO4O1J49m4YQPr1qxm5tSJdO65e0lqb6zat6mmVXULAJo3a8JhB+7J9Hfn8adxk/nsAX2B3FXTzT20P42bzKcH9KGysoIWzZtwwN69eHPmhyWrv0Eok4Qr+RC13L09eTwv//kRuvbpx7VnHgvAsPMu5ajTz+c33/sGLzw6iradu/K1a34JQJdeu9N/yCFcc8YxSBUcdMKX6NqnXym/QqPTuf1u3H716VRWVFBRIR5+cgKPPTeFv/39be760Zlc+JWhrFy9lvOvfgCA6TPn8eTf3uDVUZezaVNw9yN/4423a32geuaVyxBVm68Y1fuOpQeBQ4H2wDzgyoi4o7bP9PzkPnH5nWOKUo8Vx39//cZSl2AprJ0+ik2r5u9QOn3y3/eL344eV9C2g/u0fi0iBu3I8XZEMa+iDi/Wvs2sxMqjA+chqpmlkzu9Vh4J54Azs3Q8H5yZZVmZ5JsDzszSkh/8bGbZVSb55oAzs3QayG94C+I7GcwsvXq6k0HSnZLmS5qS1/YDSXMkTUyWY/Peu1zSDEnTJR1V1/4dcGaWmgr8vwLczbanVftZRAxIlrEAkvoDpwJ7JZ+5RVJlbTt3wJlZapsnyKlrqUtEPAssLvCww4DfRcTaiJgJzAAG1/YBB5yZpVNguCUB117S+LxlRIFH+YakyckQtk3S1hWYlbfN7KStRg44M0stxRB14ebp0JJlZAG7vxXoAwwA5gI/3d46fRXVzFIRxf2ZSETM23Is6Xbg0WR1DtA9b9NuSVuN3IMzs9SKOR2cpC55qycCm6+wjgFOldRMUm+gL1Dr3PHuwZlZevXUg8ufVk3SbOBK4FBJA4AA3gXOA4iIqZJGAW8AG4ALImJjbft3wJlZavU14WUN06rVOG9kRFwLXFvo/h1wZpZaudzJ4IAzs/TKJOEccGaWiie8NLPs8oSXZpZlZZJvDjgzS8sTXppZhpVJvjngzCydcprw0gFnZumVScI54MwsNf9MxMwyy+fgzCybBBUOODPLrvJIOAecmaVS7Akv65MDzsxSK5N8c8CZWXruwZlZZvlWLTPLrPKINwecmaVU6EOdGwIHnJml5jsZzCy7yiPfHHBmll6Z5JsDzszSUr09NrDYHHBmlko53clQUeoCzMyKxT04M0utXHpwDjgzS80/EzGzbPIPfc0sq8rpIoMDzsxS8xDVzDLLPTgzy6wyyTcHnJlthzJJOAecmaUiKJtbtRQRpa5hC0kLgPdKXUcRtAcWlroISyWr/8x6RkSHHdmBpD+T+9+nEAsj4ugdOd6OaFABl1WSxkfEoFLXYYXzP7Ns8L2oZpZZDjgzyywH3M4xstQFWGr+Z5YBPgdnZpnlHpyZZZYDzswyywFXRJKOljRd0gxJl5W6HqubpDslzZc0pdS12I5zwBWJpErgV8AxQH9guKT+pa3KCnA3ULIfplr9csAVz2BgRkS8ExHrgN8Bw0pck9UhIp4FFpe6DqsfDrji6QrMylufnbSZ2U7igDOzzHLAFc8coHveerekzcx2Egdc8bwK9JXUW1JT4FRgTIlrMmtUHHBFEhEbgG8AjwPTgFERMbW0VVldJD0IvAj0kzRb0jmlrsm2n2/VMrPMcg/OzDLLAWdmmeWAM7PMcsCZWWY54MwssxxwjZSkQyU9mrw+obbZTiS1lvT17TjGDyR9q9D2rba5W9LJKY7VyzOA2NYccBmTzGKSSkSMiYjratmkNZA64MxKzQFXJpIeypuS7pc0TdJDknZJ3ntX0k8kTQC+KOlISS9KmiDp/yRVJ9sdnexjAvCFvH2fJemXyetOkh6RNClZPg1cB/SRNFHSDcl2l0p6VdJkSVfl7eu7kt6S9DzQr4Dv9bVkP5MkPbz5OyUOlzQ+2d9xyfaVkm7IO/Z5O/q/rWWXA6689ANuiYhPAsv4eK9qUUTsD/wF+B5weLI+HrhYUnPgduB4YCDQuYZj3Aw8ExH7AvsDU4HLgLcjYkBEXCrpSKAvuSmhBgADJR0iaSC5W9IGAMcCBxTwnf4QEQckx5sG5N850Cs5xueAXyff4RxgaUQckOz/a5J6F3Aca4SqSl2ApTIrIl5IXt8H/BdwY7L+++TvEHITbL4gCaApuVuP9gRmRsQ/ACTdB4zYxjGGAmcARMRGYKmkNlttc2Sy/D1ZryYXeC2BRyJiVXKMQu693VvSNeSGwdXkbm3bbFREbAL+Iemd5DscCeyTd36uVXLstwo4ljUyDrjysvV9dfnrK5O/Ap6MiOH5G0oaUI91CPhxRNy21TEu2o593Q18PiImSToLODTvvW19XwEXRkR+ECKp13Yc2zLOQ9Ty0kPSp5LXXwae38Y2LwEHSdodQNKukvYA3gR6SeqTbDd8G58FeAo4P/lspaRWwHJyvbPNHgfOzju311VSR+BZ4POSWkhqSW44XJeWwFxJTYCvbPXeFyVVJDV/ApieHPv8ZHsk7SFp1wKOY42QA668TAcukDQNaAPcuvUGEbEAOAt4UNJkkuFpRKwhNyT9f8lFhvk1HOObwH9Ieh14DegfEYvIDXmnSLohIp4AHgBeTLZ7CGgZERPIDZUnAY+RmzKqLlcALwMvkAvhfO8DryT7+s/kO/wGeAOYkPws5DY8ErEaeDaRMpEMwR6NiL1LXIpZ2XAPzswyyz04M8ss9+DMLLMccGaWWQ44M8ssB5yZZZYDzswy6/8DDZUvzz2Tw2kAAAAASUVORK5CYII=\n",
+            "text/plain": [
+              "<Figure size 432x288 with 2 Axes>"
+            ]
+          },
+          "metadata": {
+            "tags": [],
+            "needs_background": "light"
+          }
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "NzckzSohjdJF"
+      },
+      "source": [
+        ""
+      ],
+      "execution_count": null,
+      "outputs": []
+    }
+  ]
+}
